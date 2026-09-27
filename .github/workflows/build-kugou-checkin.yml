@@ -1,0 +1,61 @@
+name: Build KugouDailyCheckin Release
+on:
+  push:
+    branches: [tmp-kugou-checkin-build-20260928]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout locked source
+        uses: actions/checkout@v4
+        with:
+          repository: dingding0131/MoeKoeMusic
+          ref: kugou-checkin-release
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        working-directory: source/tools/KugouDailyCheckin
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install --upgrade pyinstaller
+      - name: Self test
+        working-directory: source/tools/KugouDailyCheckin
+        run: python tests_selftest.py
+      - name: Build
+        working-directory: source/tools/KugouDailyCheckin
+        run: python -m PyInstaller --clean --noconfirm --onefile --noconsole --name KugouDailyCheckin app.py
+      - name: Checksums and source package
+        working-directory: source/tools/KugouDailyCheckin
+        shell: pwsh
+        run: |
+          $exeMd5=(Get-FileHash 'dist/KugouDailyCheckin.exe' -Algorithm MD5).Hash
+          $exeSha=(Get-FileHash 'dist/KugouDailyCheckin.exe' -Algorithm SHA256).Hash
+          Set-Content 'dist/KugouDailyCheckin.exe.md5' $exeMd5
+          Set-Content 'dist/KugouDailyCheckin.exe.sha256' $exeSha
+          Get-ChildItem -File *.py,*.json,*.bat,*.txt | ForEach-Object { (Get-FileHash $_.FullName -Algorithm MD5).Hash + '  ' + $_.Name } | Set-Content 'dist/SOURCE_MD5.txt'
+          Compress-Archive -Path *.py,*.json,*.bat,*.txt,requirements.txt -DestinationPath 'dist/KugouDailyCheckin-source.zip' -Force
+          $srcMd5=(Get-FileHash 'dist/KugouDailyCheckin-source.zip' -Algorithm MD5).Hash
+          $srcSha=(Get-FileHash 'dist/KugouDailyCheckin-source.zip' -Algorithm SHA256).Hash
+          Set-Content 'dist/KugouDailyCheckin-source.zip.md5' $srcMd5
+          Set-Content 'dist/KugouDailyCheckin-source.zip.sha256' $srcSha
+          $srcCommit=(git -C ../.. rev-parse HEAD)
+          $lock='protocol_manifest.json'
+          $m=Get-Content $lock -Raw | ConvertFrom-Json
+          @"
+App-Version: 1.1.0
+Protocol-Version: $($m.protocol_version)
+Upstream-Commit: $($m.upstream_commit)
+Source-Commit: $srcCommit
+EXE-MD5: $exeMd5
+EXE-SHA256: $exeSha
+SOURCE-ZIP-MD5: $srcMd5
+SOURCE-ZIP-SHA256: $srcSha
+"@ | Set-Content 'dist/RELEASE_CHECKSUMS.txt'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KugouDailyCheckin-Windows-x64-20260928
+          path: source/tools/KugouDailyCheckin/dist/
+          if-no-files-found: error
